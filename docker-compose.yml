@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the non-superuser app role (superusers bypass row-level security).
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      # Set CE_DB_PORT in .env (e.g. 5433) if a local PostgreSQL already uses 5432.
+      - "${CE_DB_PORT:-5432}:5432"
+    healthcheck:
+      # Check over TCP as app_user: during first-boot init the server only listens on a
+      # local socket, so a plain pg_isready can report "ready" before the API can connect.
+      test: ["CMD", "pg_isready", "-h", "localhost", "-U", "app_user", "-d", "compliance"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    # .env is optional here; without it the API starts with the local-dev secret below.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CE_DATABASE_URL: postgresql+psycopg://app_user:app_password@db:5432/compliance
+      CE_JWT_SECRET: ${CE_JWT_SECRET:-local-dev-only-secret-change-me-before-sharing}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
